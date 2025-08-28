@@ -17,22 +17,44 @@ except Exception:
     model = None
 
 # ===============================
-# Helper: Parse Verilog
+# Helper: Parse Verilog (Improved)
 # ===============================
 def parse_verilog(code):
-    inputs = re.findall(r'input\s+([\w, ]+);', code)
-    outputs = re.findall(r'output\s+([\w, ]+);', code)
-    assigns = re.findall(r'assign\s+(\w+)\s*=\s*(.*);', code)
+    # Capture ports in module header
+    header = re.search(r"module\s+\w+\s*\((.*?)\);", code, re.S)
+    port_section = header.group(1) if header else ""
 
-    input_list = []
-    for i in inputs:
-        input_list.extend([x.strip() for x in i.split(",")])
+    # Also capture standalone input/output declarations
+    body_ports = re.findall(r"(input|output)\s+(?:reg|wire)?\s*([\[\]\d: ]+)?\s*([\w, ]+);", code)
 
-    output_list = []
-    for o in outputs:
-        output_list.extend([x.strip() for x in o.split(",")])
+    inputs = []
+    outputs = []
+    assigns = re.findall(r'assign\s+(\w+)\s*=\s*(.*?);', code)
 
-    return input_list, output_list, assigns
+    # From module header
+    for decl in port_section.split(","):
+        decl = decl.strip()
+        m = re.match(r"(input|output)\s+(?:reg|wire)?\s*([\[\]\d: ]+)?\s*(\w+)", decl)
+        if m:
+            direction, width, name = m.groups()
+            if direction == "input":
+                inputs.append(name)
+            elif direction == "output":
+                outputs.append(name)
+
+    # From body
+    for direction, width, names in body_ports:
+        for n in names.split(","):
+            if direction == "input":
+                inputs.append(n.strip())
+            else:
+                outputs.append(n.strip())
+
+    # Remove duplicates
+    inputs = list(dict.fromkeys(inputs))
+    outputs = list(dict.fromkeys(outputs))
+
+    return inputs, outputs, assigns
 
 # ===============================
 # Generate truth table + waveforms
@@ -177,7 +199,7 @@ if st.button("Generate"):
     try:
         inputs, outputs, assigns = parse_verilog(code_input)
         if not inputs or not outputs or not assigns:
-            st.error("⚠ Could not parse inputs/outputs properly.")
+            st.error("⚠ Could not parse inputs/outputs properly. Please check your Verilog code format.")
         else:
             # Truth table & waveforms
             df, waveform_df = generate_truth_table(inputs, outputs, assigns)
